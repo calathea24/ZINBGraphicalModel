@@ -1,0 +1,13 @@
+.snakemake/
+*.rda
+*.csv
+workflow/.snakemake/*
+results/*
+*.swp
+*.pdf
+*.pkl
+*.npy
+*.dat
+*.txt
+.Rhistory
+.Rapp.history

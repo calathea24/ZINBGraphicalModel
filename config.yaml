@@ -1,0 +1,36 @@
+#simulations: ["NormRelaxExp09JAN2024"]
+simulations: ["Tria13MAR2024"]
+#ShrinkMet: ["Stein"]
+ShrinkMet: ["Lasso"]
+## Supporting methods: Stein, Lasso
+alg: ["mb"]
+#alg: ["GeneNet","Fisher2011","HimenoYamada2014","ShrinkIKS"]
+#alg: ["GeneNet"]
+## Supporting algorithms: Stein(GeneNet, Fisher2011, HimenoYamada2014, ShrinkIKS), Lasso(mb, glasso)
+ps: [200]
+#ns: range(ns1,ns2,ns3)
+ns1: 100
+ns2: 120
+ns3: 20
+degrees: [2.0]
+graph: ["random"]
+## Supporting graph: random, scale-free, hub, cluster, band
+model: ["normal"]
+seqDepth: ["50000"]
+## Supporting simulation model: normal, ESCO
+preProcess: ["scalingfNoCluster-nonparanormal"]
+## Current supporting method: scalingfCluster, scalingfNoCluster, scalingfBulk for scaling factor normalisation, 
+## logT for log transformation, hyphen to separate and order of methods to execute
+## copulaNB, copulaECDF, nonparanormal approach from huge package
+pValModel: ["ptDistribution"]
+## Supporting model to compute p-values: ptDistribution, pshrunkv1, pshrunkv2, pmontecarlo
+FDRModel: ["BH"]
+## Supporting method for FDR: localFDR, tailFDR, BH, others(from p.adjust function)
+graphSelect: ["stars"]
+ZI: ["FALSE"]
+ZImodeling : ["FALSE"]
+## ZI modeling including scalingfNoCluster
+## Options from huge.select: ric, stars, ebic (only for glasso)
+iterations: 2
+
+

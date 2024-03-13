@@ -1,0 +1,11 @@
+name: Rprocessing
+channels:
+        - conda-forge
+dependencies:
+        - r-fdrtool
+        - r-genenet
+        - r-ggplot2
+        - r-mltools
+        - r-huge
+        - r-ESCO
+	- r-corpcor
