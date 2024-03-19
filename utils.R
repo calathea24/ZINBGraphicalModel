@@ -1,7 +1,7 @@
 library(GeneNet)
 
 # ESCO simulation -------------------------------
-escoSimulateSingleGroup <- function(GeneNumbers, CellNumbers, pcorSim, depth = 50000, proportionOfZero = 0.4, ZIsimulation = FALSE, verbose = FALSE) 
+escoSimulateSingleGroup <- function(GeneNumbers, CellNumbers, pcorSim, depth = 50000, proportionOfZero = 0.4, ZIsimulation = FALSE, verbose = FALSE)
 {
   packages <- c("ESCO", "foreach", "corpcor")
   # Install packages not yet installed
@@ -9,22 +9,22 @@ escoSimulateSingleGroup <- function(GeneNumbers, CellNumbers, pcorSim, depth = 5
   if (any(installed_packages == FALSE)) {
     install.packages(packages[!installed_packages])
   }
-  
+
   # Packages loading
   invisible(lapply(packages, library, character.only = TRUE))
-  
+
   params <- newescoParams()
   checkmate::assertClass(params, "escoParams")
-  params <- setParams(params, 
-                      nGenes = GeneNumbers, 
-                      nCells = CellNumbers, 
-                      lib.loc = round(log(as.numeric(depth)), digits = 1), 
+  params <- setParams(params,
+                      nGenes = GeneNumbers,
+                      nCells = CellNumbers,
+                      lib.loc = round(log(as.numeric(depth)), digits = 1),
                       lib.scale = 0.1,
                       out.prob = 0)
   validObject(params)
   nCells <- getParam(params, "nCells")
   nGenes <- getParam(params, "nGenes")
-  
+
   #1-Set up Simulation Object
   # Set up name vectors
   cell_names <- paste0("Cell", seq_len(nCells))
@@ -35,31 +35,31 @@ escoSimulateSingleGroup <- function(GeneNumbers, CellNumbers, pcorSim, depth = 5
   features <- data.frame(Gene = gene_names)
   rownames(features) <- gene_names
   sim <- SingleCellExperiment(rowData = features, colData = cells, metadata = list(Params = params))
-  
+
   #2-Simulate library sizes
   sim <- ESCO:::escoSimLib(sim, verbose)
-  
+
   #3-Simulate base gene means
   sim <- ESCO:::escoSimGeneMeans(sim, verbose)
-  
+
   #4-Simulate gene means
   sim <- ESCO:::escoSimSingleCellMeans(sim, verbose)
-  
-  #5-Simulate true counts 
+
+  #5-Simulate true counts
   # bcv (Biological Coefficient of Variation) simulation
   bcv_common <- getParam(params, "bcv.common")
   bcv_df <- getParam(params, "bcv.df")
   basecell_means <- assays(sim,withDimnames = FALSE)$BaseCellMeans
   basecell_means <- as.matrix(basecell_means)
-  
+
   bcv <- (bcv_common + (1 / sqrt(basecell_means)))*sqrt(bcv_df/rchisq(nGenes, df = bcv_df))
   dimnames(bcv) <- dimnames(basecell_means)
   bcv <- as.matrix(bcv)
-  
+
   cell_means <- matrix(rgamma(nGenes * nCells, shape = 1 / (bcv ^ 2),
                               scale = basecell_means * (bcv ^ 2)),
                        nrow = nGenes, ncol = nCells)
-  
+
   # correlated gene simulation, change randcor function in ESCO to simulate from partial correlation matrix
   randcor <- function(pcorr){
     corrgenes <- sample(1:nGenes, nrow(pcorSim))
@@ -69,20 +69,20 @@ escoSimulateSingleGroup <- function(GeneNumbers, CellNumbers, pcorSim, depth = 5
     re = list("pcor" = pcorr, "cor" = corr, "corrgenes" = corrgenes)
     return(re)
   }
-  
+
   corr_sim <- randcor(pcorSim)
   rho <- corr_sim[["cor"]]
   pcor.truth <- corr_sim[["pcor"]]
   corrgenes <- corr_sim[["corrgenes"]]
   params <- setParams(params, corr = list(rho))
   copular <- ESCO:::randcop(rho, nCells)
-  
+
   mulpo <- function(i) {
     count = rnbinom(nGenes, size = 1/(bcv[,i]^2), mu = basecell_means[,i])
     count[corrgenes] = qnbinom(copular[,i],  size = 1/(bcv[corrgenes,i]^2), mu = basecell_means[corrgenes,i])
     return(count)
   }
-  
+
   # change ESCO code to do sequential processing instead of parallel, reduce error when simulating
   total <- ncol(basecell_means)
   if (verbose) {
@@ -90,7 +90,7 @@ escoSimulateSingleGroup <- function(GeneNumbers, CellNumbers, pcorSim, depth = 5
       format = "progress = :letter [:bar] :elapsed | eta: :eta", total = total, width = 60)
     progress <- function(n){
       pb$tick(tokens = list(letter = rep("", total)[n]))
-    } 
+    }
     opts <- list(progress = progress)
     true_count <- foreach(i = 1:total, .combine = cbind, .options.snow = opts, .export = c("rowData")) %do% {
       return(mulpo(i))
@@ -103,7 +103,7 @@ escoSimulateSingleGroup <- function(GeneNumbers, CellNumbers, pcorSim, depth = 5
   colnames(true_count) <- cell_names
   rownames(true_count) <- gene_names
   true_count[true_count==Inf] <- max(true_count[true_count!=Inf]) + 10
-  
+
   # make sure correlated genes having zero counts less than certain percent
   if(!is.null(proportionOfZero)){
     data_check <- t(true_count[corrgenes,])
@@ -124,11 +124,11 @@ escoSimulateSingleGroup <- function(GeneNumbers, CellNumbers, pcorSim, depth = 5
       }
     }
   }
-  
+
   assays(sim,withDimnames = FALSE)$TrueCounts <- true_count
   assays(sim,withDimnames = FALSE)$CellMeans <- cell_means
   metadata(sim)$Params = params
-  
+
   #6-Simulate zero inflation
   if (ZIsimulation) {
     dropout_mid <- rep(getParam(params, "dropout.mid"), nCells)
@@ -136,7 +136,7 @@ escoSimulateSingleGroup <- function(GeneNumbers, CellNumbers, pcorSim, depth = 5
     dropout_cort <- getParam(params, "dropout.cort")
     cell_normmeans <- median(colSums(cell_means))*t(t(cell_means)/colSums(cell_means))
     dropout_shape <- getParam(params, "dropout.shape")
-    
+
     # Generate probabilites based on expression
     logistic <- function(x, x0, k) {
       1 / (1 + exp(-k * (x - x0)))
@@ -145,15 +145,15 @@ escoSimulateSingleGroup <- function(GeneNumbers, CellNumbers, pcorSim, depth = 5
       eta <- log(cell_normmeans[,idx])
       return(logistic(eta, x0 = dropout_mid[idx], k = dropout_shape[idx]))
     }, FUN.VALUE = rep(0,nGenes))
-    
-    if(!dropout_cort) keep_prob <- 1 - drop_prob 
+
+    if(!dropout_cort) keep_prob <- 1 - drop_prob
     keep_prob[keep_prob>1] <- 1
     keep_prob[keep_prob<0] <- 0
     keep_prob[is.na(keep_prob)] <- 1
     keep <- matrix(rbinom(nCells * nGenes, 1, keep_prob),
                    nrow = nGenes, ncol = nCells)
     ZI_counts <- true_count * keep
-    
+
     return(list(TrueCounts = true_count, ZICounts = ZI_counts, pcor.truth = pcor.truth))
   } else {
     return(list(TrueCounts = true_count, pcor.truth = pcor.truth))
@@ -161,6 +161,28 @@ escoSimulateSingleGroup <- function(GeneNumbers, CellNumbers, pcorSim, depth = 5
 }
 
 # Network structure simulation ------------------
+simulateBAmodel <- function(num_of_nodes, m) {
+  N <- num_of_nodes
+
+  # 1. Generate base graph with 2 nodes and 1 edge between them
+  adj_mat <- matrix(0, nrow = N, ncol = N)
+  adj_mat[2,1] <- adj_mat[1,2] <- 1
+  degs <- c(1,2)
+
+  # 2.  Add nodes gradually until total nodes equal N
+  for (i in 3:N) {
+    k <- rpois(n = 1, lambda = m)
+    alist <- vector()
+    for (j in 1:k) {
+      a <- sample(degs, size = 1)
+      adj_mat[i,a] <- adj_mat[a,i] <- 1
+      alist <- append(alist, c(a,i))
+    }
+    degs <- append(degs, alist) ## preferential attachment
+  }
+  return(adj_mat)
+}
+
 graph.generator <- function(d = NULL, graph = "random", degree = 2, g = NULL, prob = NULL, etaA = 0.05, pcor.return = TRUE)
 {
   if(!require("huge")) {
@@ -168,9 +190,9 @@ graph.generator <- function(d = NULL, graph = "random", degree = 2, g = NULL, pr
   } else {
     library("huge")
   }
-  
+
   gcinfo(FALSE)
-  
+
   if(is.null(g)){ ## group in hub and cluster graph
     g = 1
     if(graph == "hub" || graph == "cluster"){
@@ -178,7 +200,7 @@ graph.generator <- function(d = NULL, graph = "random", degree = 2, g = NULL, pr
       if(d <= 40) g = 2
     }
   }
-  
+
   if(graph == "cluster"){
     if(is.null(prob)){
       if(d/g > 30)  prob = 0.3
@@ -186,11 +208,11 @@ graph.generator <- function(d = NULL, graph = "random", degree = 2, g = NULL, pr
     }
     prob = sqrt(prob/2)*(prob<0.5)+(1-sqrt(0.5-0.5*prob))*(prob>=0.5)
   }
-  
+
   ####################
   eps = 0.0001
   ###################
-  
+
   # parition variables into groups
   g.large = d%%g
   g.small = g - g.large
@@ -200,30 +222,30 @@ graph.generator <- function(d = NULL, graph = "random", degree = 2, g = NULL, pr
   g.ind = rep(c(1:g),g.list)
   rm(g.large,g.small,n.small,n.large,g.list)
   gc()
-  
-  
+
+
   # Build the graph structure with adjacency matrix
   adj.mat = matrix(0,d,d);
-  
+
   if(graph == "random") {
     num.edges = d*(d-1)/2
     degree = degree
     etaA = (degree*d)/num.edges
-    num.elements = ceiling(num.edges*etaA) 
+    num.elements = ceiling(num.edges*etaA)
     element.idx = sample(1:num.edges, num.elements)
     adj.lo = rep(0,num.edges)
     adj.lo[element.idx] = 1
     adj.mat[lower.tri(adj.mat)] = adj.lo
     adj.mat = adj.mat + t(adj.mat)
   }
-  
+
   if(graph == "band"){
     for(i in 1:g){
       diag(adj.mat[1:(d-i),(1+i):d]) = 1
       diag(adj.mat[(1+i):d,1:(d-1)]) = 1
     }
   }
-  
+
   if(graph == "cluster"){
     for(i in 1:g){
       tmp = which(g.ind==i)
@@ -234,7 +256,7 @@ graph.generator <- function(d = NULL, graph = "random", degree = 2, g = NULL, pr
       gc()
     }
   }
-  
+
   if(graph == "hub"){
     for(i in 1:g){
       tmp = which(g.ind==i)
@@ -244,32 +266,31 @@ graph.generator <- function(d = NULL, graph = "random", degree = 2, g = NULL, pr
       gc()
     }
   }
-  
+
   if(graph == "scale-free"){
-    out = .Call("_huge_SFGen", 2, d, PACKAGE= "huge")
-    adj.mat = matrix(as.numeric(out$G),d,d)
+    adj.mat = simulateBAmodel(d, 1.5)
   }
-  
+
   diag(adj.mat) = 0
-  
+
   # Simulate precision matrix from adjacency matrix
   selected.edges = which(adj.mat[upper.tri(adj.mat)]!=0)
   precision = matrix(0, nrow=d, ncol=d)
   precision[upper.tri(precision)][selected.edges] = runif(length(selected.edges),-1.0,+1.0)
   precision = precision + t(precision)
-  
+
   #Constructing diagonally dominant/ positive definite matrix
   for(i in 1:d)
   {
-    diag(precision)[i] = sum(abs(precision[,i])) + eps	
+    diag(precision)[i] = sum(abs(precision[,i])) + eps
   }
-  
+
   #Converting to partial correlation matrix
-  pcor = cov2cor(precision) # Standardize precision matrix 
+  pcor = cov2cor(precision) # Standardize precision matrix
   # change signs of the off-diagonal entries to obtain pcor matrix
   pcor = -pcor
   diag(pcor) = -diag(pcor) # keep positive sign on diagonal
-  
+
   if(pcor.return){
     return(pcor)
   } else {
@@ -286,7 +307,7 @@ data.simulate <- function(features, samples, graph = "random", degree = 2, type 
 {
   ## Step 1: simulate partial correlation matrix
   pcor.sim = graph.generator(d = features, graph = graph, degree = degree, pcor.return = TRUE)
-  
+
   ## Step 2: simulate data using pcor.sim
   if (type == "normal") {
     sim.dat = ggm.simulate.data(sample.size = samples, pcor = pcor.sim)
@@ -312,7 +333,7 @@ data.simulate <- function(features, samples, graph = "random", degree = 2, type 
 }
 
 # Data preprocessing ----------------------------
-scaling.fac <- function(data, clusters = TRUE, bulk = FALSE){ 
+scaling.fac <- function(data, clusters = TRUE, bulk = FALSE){
   #Details: p x n count data, estimate factor for each cell/observation
   #         bulk method - divide library sizes to mean
   #         scalingfNoClustes - no cluster specified
@@ -342,7 +363,7 @@ copulaNB <- function(xs,scales) {
   ml <- optim(c(mean(xs),1), nblike, method = "L-BFGS-B", lower = c(0.001,0.001), upper = c(Inf,Inf))
   mu <- ml$par[1]
   si <- ml$par[2]
-  
+
   p <- pnbinom(xs, size = si, mu = mu)
   p[p==0] = 0.00001
   p[p==1] = 0.99999
@@ -361,17 +382,17 @@ copulaECDF <- function(xs) {
 
 preprocessing <- function(data, method) {
   x <- t(data)
-  
+
   if (method %in% c("scalingfCluster", "scalingfNoCluster", "scalingfBulk")) {
     clusters <- method %in% c("scalingfCluster", "scalingfBulk")
     bulk <- method %in% c("scalingfBulk")
     weights <- scaling.fac(x, clusters = clusters, bulk = bulk)
     xs <- t(sweep(x, 2, weights, "/"))
     return(xs)
-    
+
   } else if (method == "logT") {
     return(log(data + 1))
-    
+
   } else if (method %in% c("copulaNB", "copulaECDF")) {
     NB <- method == "copulaNB"
     weights <- scaling.fac(x, clusters = FALSE, bulk = FALSE)
@@ -385,15 +406,15 @@ preprocessing <- function(data, method) {
     rownames(da) <- rownames(x)
     colnames(da) <- colnames(x)
     return(da)
-    
+
   } else if (method == "nonparanormal") {
     library(huge)
     data.npn <- huge.npn(data, npn.func = "truncation", verbose = FALSE)
     return(data.npn)
-    
+
   } else if (method == "none") {
     return(data)
-    
+
   }
 }
 
@@ -416,7 +437,7 @@ maxlikeNB <- function(xs, scaling) {
   if(is.null(scaling)){
     scaling = rep(1, length(xs))
   }
-  
+
   nblike <- function(ps)
   {
     w <- ps[3]
@@ -437,7 +458,7 @@ get_mix_parameters_new = function(count, scales){
   return(parslist)
 }
 
-calculate_weight_new = function (x, paramt, scales){ 
+calculate_weight_new = function (x, paramt, scales){
   pz1 = paramt[3] * kroneckerDelta(x)
   if (is.null(scales)) {
     scales = rep(1, length(x))
@@ -468,11 +489,11 @@ if_dropout_scimpute_new = function(mat, dthre = 0.5, scales){
 count_ZI = function(x, scaling = NULL, preProcess = NULL){
   x = as.matrix(x)
   dropout_id = if_dropout_scimpute_new(x, dthre = 0.5, scales = scaling)
-  
+
   if (!is.null(scaling)){
     x = sweep(x, 1, scaling, "/")
-  } 
-  
+  }
+
   if(!is.null(preProcess)){
     methods = strsplit(preProcess,"-")[[1]]
     for (i in 1:length(methods)){
@@ -480,7 +501,7 @@ count_ZI = function(x, scaling = NULL, preProcess = NULL){
       x = preprocessing(x, method = met)
     }
   }
-  
+
   x = wt.scale(x)
   x[dropout_id==1] = 0
   return(x)
@@ -504,12 +525,12 @@ Fisher2011 <- function(data) {
   x = as.matrix(data)
   n = nrow(x)
   p = ncol(x)
-  
+
   S.emp = covcal(x)
   #Shrinkage intensity estimate (equations 11)
   a1 = sum(diag(S.emp))/p
   a2 = (n^2/((n-1)*(n+2)*p))*(sum(diag(S.emp %*% S.emp)) - 1/n*(sum(diag(S.emp))^2))
-  
+
   lambda = (1/n*a2 + p/n*(a1^2))/((n+1)/n*a2+p/n*(a1^2)-2*a1+1)
   lambda = max(0, min(1, lambda)) ## truncate lambda to [0,1]
   return(lambda)
@@ -520,7 +541,7 @@ HimenoYamada2014 = function(data) {
   N = nrow(x)
   n = N - 1
   p = ncol(x)
-  
+
   #Shrinkage intensity estimate based on theorem 1 from T.Himeno, T.Yamada 2014 and function of Lambda shrinking
   #towards identity matrix (page 254, A.Touloumis, 2015)
   S = covcal(x)
@@ -543,18 +564,18 @@ ShrinkIKS <- function(data) {
   N = nrow(x)
   n = N - 1
   p = ncol(x)
-  
+
   #Shrinkage intensity estimate (equations 11)
   S = covcal(x)
   Q = 1/(N-1)*sum((diag(x%*%t(x)))^2)
   const = (N-1)/(N*(N-2)*(N-3))
-  
+
   a2c = const*((N-1)*(N-2)*sum(diag(S%*%S)) + (sum(diag(S)))^2 - N*Q)/p
   a1.2 = (sum(diag(S))/p)^2
-  
+
   numerator = (sum(diag(S%*%S)))/p - a2c
   denominator = (sum(diag(S%*%S)))/p - a1.2
-  
+
   lambda = numerator/denominator
   lambda = max(0, min(1, lambda))
   return(lambda)
@@ -565,7 +586,7 @@ SteinShrink <- function(data, method, lambda = NULL, lambda.return = FALSE) {
     shrinkageFunction <- match.fun(method)
     lambda <- shrinkageFunction(data)
   }
-  
+
   if (lambda.return) {
     return(lambda)
   } else {
@@ -597,31 +618,31 @@ pshrunkv1 <- function(pcor, p, n, lambda) {
     fp = ((k-3)/2)*log((1-lambda)^2-x^2) - log(beta(1/2,(k-1)/2)) - (k-2)*log(1-lambda)
     return(fp)
   }
-  
+
   #=====================Estimate k with MLE=====================#
   ### Simulate data with all partial correlation = 0
   ### Fitting distribution function on it
-  
+
   k.est <- function(p, n, lambda) {
     # Simulate data
     pcor.sim = ggm.simulate.pcor(p, 0)
     data.sim = ggm.simulate.data(n, pcor.sim)
     pcor.est = pcor.shrink(data.sim, lambda, verbose = FALSE)
     pcor.shrunk = sm2vec(pcor.est)
-    
+
     #MLE
     F0.mle <- function(k0) {
       -sum(F0(pcor.shrunk, k = k0))
     }
     ml <- optim(100, F0.mle, method="L-BFGS-B", lower=5, upper=Inf)
-    
+
     return(ml$par[1])
   }
-  
+
   ### Iteration 50 to take mean value of k in each simulation
   k.iter <- 50
   k <- mean(sapply(1:k.iter, function(i){k.est(p, n, lambda)}))
-  
+
   #=====================Calculate p-value=====================#
   pval.mat = matrix(Inf, length(pcor), 1)
   fp0 = function(x) {(((1-lambda)^2-x^2)^((k-3)/2))/(beta(1/2,(k-1)/2)*((1-lambda)^(k-2)))}
@@ -635,15 +656,15 @@ pshrunkv1 <- function(pcor, p, n, lambda) {
 pshrunkv2 <- function(pcor, p, n, lambda) { # Codes from GeneNetTools package
   library(GeneNetTools)
   k = k.shrunk(p, n, lambda) ## estimate by standard
-  
+
   # Estimate p values using the shrunk t-test
-  
+
   # Rescale pcor
   rr <-  unlist(pcor) / (1- lambda)
-  
+
   # T-test
   tt <- rr * sqrt( (k-1)/(1 - rr^2 ) )
-  
+
   # p-vals student
   pval.shrunk <- 2*pt(q = -abs(tt),
                       df = (k - 1),
@@ -653,15 +674,15 @@ pshrunkv2 <- function(pcor, p, n, lambda) { # Codes from GeneNetTools package
 }
 
 pmontecarlo <- function(pcor, p, n, graph, model, preProcess, lambda, ShrinkMet, algorithm, number = 50, depth = 50000) { ## generalize: required data simulation model and pcor.est model
-  
+
   cum.pv<-matrix(0,length(pcor),1)
-  
+
   # Simulate null hypothetic GGM coefficients for "number" times
   for (i in 1:number){
     sim <- data.simulate(p, n, graph, degree = 0, type = model, depth = depth)
     r.data <- sim$sim.dat
     pcor.data <- sim$pcor.sim
-    
+
     if (model == "ESCO"){
       methods = strsplit(preProcess,"-")[[1]]
       for (i in 1:length(methods)){
@@ -675,20 +696,20 @@ pmontecarlo <- function(pcor, p, n, graph, model, preProcess, lambda, ShrinkMet,
       }
       r.data = r.data[,colnames(pcor.data)]
     }
-    
+
     if (ShrinkMet == "Stein") {
       r.monte.GGM = SteinShrink(r.data, method = algorithm, lambda = lambda)
     } else {
       message("pMonteCarlo only for Stein-type estimators")
     }
     r.monte <- sm2vec(r.monte.GGM)
-    
-    # compare the real coefficients against r.monte  
-    pv <- sapply(pcor, function(x) sum(abs(r.monte)>=abs(x))/length(r.monte))  
+
+    # compare the real coefficients against r.monte
+    pv <- sapply(pcor, function(x) sum(abs(r.monte)>=abs(x))/length(r.monte))
     cum.pv <- cum.pv + pv
   }
-  
-  # p values  
+
+  # p values
   p.monte<-cum.pv/number
   return (p.monte)
 }
@@ -699,7 +720,7 @@ pcor.testing <- function(pc, ..., pmodel = "ptDistribution", method = "BH")
   cutoff.pval <- 0.05
   p <- ncol(pc)
   pcor <- sm2vec(pc)
-  
+
   ##1/Computing p-values
   pCalculation <- match.fun(pmodel)
   argumentList <- list(pcor = pcor, ...)
@@ -714,7 +735,7 @@ pcor.testing <- function(pc, ..., pmodel = "ptDistribution", method = "BH")
   } else {
     p.adj <- p.adjust(pval, method = method)
   }
-  
+
   ##3/ Returning adjacency matrix
   indexes = sm.index(pc)
   colnames(indexes) = c("node1", "node2")
@@ -742,10 +763,10 @@ mcc.pcor <- function(est, pcor.truth) {
   return(mcc)
 }
 
-quiet <- function(x) { 
-  sink(tempfile()) 
-  on.exit(sink()) 
-  invisible(force(x)) 
+quiet <- function(x) {
+  sink(tempfile())
+  on.exit(sink())
+  invisible(force(x))
 }
 
 
