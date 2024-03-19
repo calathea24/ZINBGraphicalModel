@@ -161,6 +161,7 @@ escoSimulateSingleGroup <- function(GeneNumbers, CellNumbers, pcorSim, depth = 5
 }
 
 # Network structure simulation ------------------
+
 simulateBAmodel <- function(num_of_nodes, m) {
   N <- num_of_nodes
 
